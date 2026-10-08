@@ -27,9 +27,11 @@ export const CONFIG = {
   // para jugar entre redes distintas hace falta un TURN propio: añade aquí las credenciales (ver README).
   ICE_SERVERS: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    // { urls: ['turn:TU_HOST:80', 'turn:TU_HOST:443?transport=tcp', 'turns:TU_HOST:443?transport=tcp'],
-    //   username: 'TU_USUARIO', credential: 'TU_CLAVE' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    { urls: 'turn:global.relay.metered.ca:80', username: 'f1f78e3f73dc62acb26fe514', credential: 'k4zDBnPy4I8k7b3T' },
+    { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'f1f78e3f73dc62acb26fe514', credential: 'k4zDBnPy4I8k7b3T' },
+    { urls: 'turn:global.relay.metered.ca:443', username: 'f1f78e3f73dc62acb26fe514', credential: 'k4zDBnPy4I8k7b3T' },
+    { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'f1f78e3f73dc62acb26fe514', credential: 'k4zDBnPy4I8k7b3T' },
   ],
   PEER_OPTIONS: {}, // p.ej. { host, port, path } para un broker PeerJS propio
   PEER_PREFIX: 'jbf-',
