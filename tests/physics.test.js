@@ -67,7 +67,7 @@ test('cuenta atrás congela, luego acelera y frena', () => {
   step(s, [GAS, GAS], DT, track);
   assert.equal(s.phase, 'countdown');
   assert.equal(s.cars[0].y, 0);
-  while (s.phase === 'countdown') step(s, [GAS, GAS], DT, track);
+  while (s.phase === 'countdown') step(s, [IDLE, IDLE], DT, track);
   for (let i = 0; i < 60; i++) step(s, [GAS, IDLE], DT, track);
   assert.ok(s.cars[0].y < -50 && s.cars[0].vy < 0);
   assert.ok(Math.abs(s.cars[1].y) < 1e-6);
@@ -91,8 +91,8 @@ test('colisión coche-coche simétrica (daño y rebote)', () => {
   const mk = (swap) => {
     const s = raceState(track);
     const [a, b] = swap ? [s.cars[1], s.cars[0]] : [s.cars[0], s.cars[1]];
-    a.x = -10; a.y = 0; a.vy = -300; a.vx = 0;
-    b.x = 10; b.y = -30; b.vy = -100; b.vx = 0;
+    a.x = -3; a.y = 0; a.vy = -300; a.vx = 0;
+    b.x = 3; b.y = -40; b.vy = -100; b.vx = 0;
     step(s, [IDLE, IDLE], DT, track);
     return swap ? [s.cars[1], s.cars[0]] : [s.cars[0], s.cars[1]];
   };
@@ -100,7 +100,7 @@ test('colisión coche-coche simétrica (daño y rebote)', () => {
   assert.ok(a1.hp < CONFIG.CAR.MAX_HP && b1.hp < CONFIG.CAR.MAX_HP);
   assert.ok(Math.abs(a1.hp - b1.hp) < 1e-9, 'ambos reciben el mismo daño');
   assert.ok(Math.abs(a1.hp - a2.hp) < 1e-9 && Math.abs(b1.vy - b2.vy) < 1e-9, 'independiente del id');
-  assert.ok(b1.vy < a1.vy === false || true);
+  assert.ok(b1.vy < -100, 'el de delante gana velocidad');
   assert.ok(a1.vy > -300, 'el coche rápido pierde velocidad');
 });
 
