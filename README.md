@@ -59,6 +59,8 @@ Todas las rutas son relativas y hay un `.nojekyll`, así que funciona bajo la su
 4. En móvil aparecen botones ◀ ▶ (girar) y ▲ ▼ (acelerar/frenar); tocar la pantalla apunta y dispara. Con `?touch=1` se fuerzan en cualquier dispositivo.
 
 ## Conectividad y TURN (`CONFIG.ICE_SERVERS`)
+
+> Nota: pasar `iceServers` a PeerJS reemplaza los suyos por defecto; por eso la lista por defecto ya incluye el TURN público de PeerJS y uno de respaldo (Open Relay). Son gratuitos y compartidos: para uso serio, pon un TURN propio.
 Por defecto se usan STUN públicos de Google, que bastan en la mayoría de redes. Con NAT simétrico, wifi corporativo o algunas redes 4G (~10-15 % de casos) la conexión directa falla y la UI muestra un aviso de NAT/TURN. Solución: añadir un servidor TURN en `src/config.js`:
 ```js
 ICE_SERVERS: [
