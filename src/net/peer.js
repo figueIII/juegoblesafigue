@@ -282,13 +282,15 @@ function joinWith(rawCode, { PeerCtor, linkOptions = {}, connectTimeoutMs = 1500
       try { peer.destroy(); } catch {}
       reject(new Error(msg));
     };
-    const timer = setTimeout(() => fail('No se pudo conectar con el anfitrión. Si ambos estáis en redes estrictas (NAT), puede hacer falta un servidor TURN.'), connectTimeoutMs);
+    let ctrlConn = null;
+    const iceState = () => { try { return ctrlConn && ctrlConn.peerConnection ? ` (ICE: ${ctrlConn.peerConnection.iceConnectionState})` : ''; } catch { return ''; } };
+    const timer = setTimeout(() => fail('No se pudo conectar con el anfitrión. Si ambos estáis en redes estrictas (NAT), puede hacer falta un servidor TURN.' + iceState()), connectTimeoutMs);
 
     peer.on('error', (err) => fail(peerErrorMessage(err)));
     peer.on('disconnected', () => { try { peer.reconnect(); } catch {} });
     peer.on('open', () => {
       const target = CONFIG.PEER_PREFIX + code;
-      const ctrlConn = peer.connect(target, connOptions('ctrl'));
+      ctrlConn = peer.connect(target, connOptions('ctrl'));
       ctrlConn.on('error', () => fail('Error de conexión con el anfitrión.'));
       ctrlConn.on('close', () => { if (!settled) fail('El anfitrión cerró la conexión.'); });
       ctrlConn.on('open', () => {

@@ -37,7 +37,7 @@ jobs:
       - name: Preparar sitio
         run: |
           mkdir _site
-          cp -r index.html src vendor .nojekyll _site/
+          cp -r index.html diag.html src vendor .nojekyll _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

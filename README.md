@@ -60,6 +60,8 @@ Todas las rutas son relativas y hay un `.nojekyll`, así que funciona bajo la su
 
 ## Conectividad y TURN (`CONFIG.ICE_SERVERS`)
 
+> Si dos ordenadores en redes distintas no conectan, abre `diag.html` (p. ej. `…/juegoblesafigue/diag.html`) en ambos: lista qué STUN/TURN responden desde cada red.
+
 > Nota: pasar `iceServers` a PeerJS reemplaza los suyos por defecto; por eso la lista por defecto ya incluye el TURN público de PeerJS y uno de respaldo (Open Relay). Son gratuitos y compartidos: para uso serio, pon un TURN propio.
 Por defecto se usan STUN públicos de Google, que bastan en la mayoría de redes. Con NAT simétrico, wifi corporativo o algunas redes 4G (~10-15 % de casos) la conexión directa falla y la UI muestra un aviso de NAT/TURN. Solución: añadir un servidor TURN en `src/config.js`:
 ```js
