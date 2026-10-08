@@ -5,7 +5,7 @@ Carrera 1v1 cenital con sabotajes (misil, aceite, EMP), directa entre navegadore
 ## Cómo jugar
 1. Un jugador pulsa **Crear sala** y copia el enlace `https://<usuario>.github.io/<repo>/#CODE` (botón *Copiar*).
 2. El rival abre el enlace (se une solo) o entra en el menú, escribe el código y pulsa **Unirse**.
-3. Cuenta atrás de 3 s y a correr. Gana quien cruza la meta primero. A los 60 s gana el más adelantado. Con 0 de HP pierdes.
+3. Cuenta atrás de 3 s y a correr. Gana quien cruza la meta primero; no hay límite de tiempo. Con 0 de HP pierdes (si los dos caen a la vez, empate). Si te quedas muy atrás, el juego te ayuda a remontar (ver Balance).
 4. Recoge los pickups para obtener un sabotaje (1 hueco) y úsalo contra el rival. Al terminar: **Revancha** (los dos deben aceptar) o **Volver al menú**.
 
 ## Controles
@@ -21,7 +21,7 @@ Los módulos ES requieren servidor HTTP (no `file://`):
 ```
 python3 -m http.server 8080   # y abrir http://localhost:8080
 ```
-- `npm test`: física, red (con latencia simulada, `createLinkPair({latencyMs})`) y balance con bots. No necesita dependencias.
+- `npm test`: física, red (con latencia simulada, `createLinkPair({latencyMs, jitterMs, lossRate})`; jitter y pérdida solo afectan al canal no fiable) y balance con bots. No necesita dependencias.
 - `npm run balance`: resumen de balance por consola (`tools/botsim.js`).
 - `npm run test:e2e`: navegador real (Playwright + Chromium) con PeerJS falso; ver `tests/e2e/README.md`. Playwright **no** es dependencia del proyecto.
 
@@ -30,8 +30,7 @@ Ajustado con simulaciones de bots simples (`tools/botsim.js`, comprobadas en `te
 
 | Parámetro | Valor | Efecto |
 |---|---|---|
-| `RACE_SECONDS` | 60 | Límite de carrera; si nadie llega, gana el más adelantado |
-| `TRACK.LENGTH` | 32000 px | Con `CAR.MAX_SPEED` 620 la meta es inalcanzable antes de ~53 s; un bot competente tarda ~51-56 s y la carrera dura de media ~53 s |
+| `TRACK.LENGTH` | 32000 px | Sin límite de tiempo (la pista siempre termina en `finishY`); un bot competente tarda ~50-57 s y la carrera dura de media ~52-57 s |
 | `CAR.MAX_HP` | 100 | |
 | `CAR.COLLISION_DAMAGE` | 0.02 | Empujón fuerte coche-coche: 5-6 HP a cada uno |
 | `CAR.OBSTACLE_DAMAGE` | 0.015 | Obstáculo de frente a máxima velocidad: ~9 HP (antes 0.03: un bot mediano moría el 50 % de las veces) |
@@ -39,9 +38,17 @@ Ajustado con simulaciones de bots simples (`tools/botsim.js`, comprobadas en `te
 | `SABOTAGE.MISSILE` | 18 HP + empuje 380 | Unos 5-6 misiles para matar: nunca es letal por sí solo |
 | `SABOTAGE.OIL` | radio 60, 4 s, agarre 15 % | |
 | `SABOTAGE.EMP` | alcance 700, 1.5 s invertido | |
-| `TRACK.PICKUP_EVERY` | 1800 px | ~17 pickups por carrera |
+| `TRACK.PICKUP_EVERY` | 1500 px | ~21 pickups por carrera |
+| `CATCHUP.START` / `FULL` / `MAX_BONUS` | 600 / 1800 px / +12 % | Rubber-band: el rezagado gana velocidad máx. y aceleración proporcional a la distancia (0 a 600 px, tope a 1800). El líder no se frena (`LEADER_PENALTY` 0) |
+| `CATCHUP.PICKUP_BIAS_GAP` + `PICKUP_WEIGHTS` | 300 px | Con más de 300 px de diferencia, el pickup del rezagado es misil 60 % / aceite 20 % / EMP 20 %; el del líder 15 / 45 / 40 %. Parejo: uniforme. Determinista (según el id del pickup y las posiciones) |
+| `CATCHUP.TURBO_GAP` / `TURBO_COOLDOWN` | 1500 px / 7 s | «¡Turbo remontada!» (indicador en el HUD): el rezagado recibe un misil automático si tiene la ranura vacía, como mucho cada 7 s |
+
+Remontada (`comebackStats` en `tools/botsim.js`; coche 0 sale con ventaja inicial, bots idénticos de habilidad 0,95, 80 carreras): con 1000 px el líder gana ~71 %, con 1500 px ~65 % (el rezagado remonta ~35 %), con 2000 px ~75 %. `npm run balance` lo imprime y `tests/balance.test.js` exige 55-82 % para el líder a 1500 px.
 
 Resultado en simulación (60 carreras con bots de habilidad 0,95): el bot que usa sabotajes gana ~68 % frente a otro idéntico que no los usa (útiles, no decisivos); las muertes por impactos son una minoría y tardan más de 30 s.
+
+## Fluidez de red
+Snapshots a 30 Hz (`SNAPSHOT_HZ`) con decimales recortados (menor tamaño). El rival se interpola con retardo `INTERP_DELAY_MS` (110 ms) + 2×jitter medido (hasta `INTERP_MAX_DELAY_MS`), con reloj monótono que corrige con pendiente limitada y extrapolación corta (≤200 ms) si falta un snapshot. El coche propio se predice y la corrección del host se reparte con decaimiento exponencial (solo hay teletransporte con error >220 px).
 
 ## Despliegue en GitHub Pages (Actions)
 El repositorio incluye `.github/workflows/pages.yml` (push a `main` o ejecución manual: `npm test` y publicación del sitio con `upload-pages-artifact` + `deploy-pages`). Pasos exactos:

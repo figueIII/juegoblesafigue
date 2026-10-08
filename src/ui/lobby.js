@@ -107,7 +107,7 @@ export function createLobby(root, h) {
       api.hideCountdown();
       const titles = { win: 'Victoria', lose: 'Derrota', draw: 'Empate' };
       const reasons = {
-        finish: 'Cruzó la meta primero', destroyed: 'Coche destruido', time: 'Se acabó el tiempo',
+        finish: 'Cruzó la meta primero', destroyed: 'Coche destruido',
         disconnect: 'El rival se desconectó',
       };
       const status = el('p', { class: 'muted', id: 'rematch-status' }, detail);

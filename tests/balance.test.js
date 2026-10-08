@@ -1,8 +1,7 @@
 // Balance con bots simples (tools/botsim.js). Umbrales holgados: detectan regresiones de config.js, no ruido.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simulate, makeBot } from '../tools/botsim.js';
-import { CONFIG } from '../src/config.js';
+import { simulate, makeBot, comebackStats } from '../tools/botsim.js';
 
 const N = 24;
 const runs = [];
@@ -12,12 +11,19 @@ for (let k = 0; k < N; k++) {
   runs.push({ aggSide, r: simulate({ seed: k + 1, bots }) });
 }
 
-test('nadie llega a meta antes de 45 s y la carrera dura cerca de 60 s', () => {
-  const finishes = runs.filter((x) => x.r.reason === 'finish').map((x) => x.r.time);
-  if (finishes.length) assert.ok(Math.min(...finishes) >= 45, `meta demasiado pronto: ${Math.min(...finishes)}`);
+test('sin límite de tiempo: toda carrera termina y dura de media 40-75 s', () => {
   const avg = runs.reduce((a, x) => a + x.r.time, 0) / N;
-  assert.ok(avg >= 45 && avg <= CONFIG.RACE_SECONDS, `duración media ${avg}`);
-  assert.ok(runs.every((x) => x.r.time <= CONFIG.RACE_SECONDS + 0.1));
+  assert.ok(avg >= 40 && avg <= 75, `duración media ${avg}`);
+  assert.ok(runs.every((x) => x.r.state.phase === 'over'), 'todas terminan');
+  const finishes = runs.filter((x) => x.r.reason === 'finish').map((x) => x.r.time);
+  if (finishes.length) assert.ok(Math.min(...finishes) >= 40, `meta demasiado pronto: ${Math.min(...finishes)}`);
+});
+
+test('remontada: con 1500 px de ventaja el líder gana la mayoría (55-82 %) pero el rezagado remonta con frecuencia', () => {
+  const st = comebackStats(40, 1500);
+  assert.ok(st.leaderWins >= 0.55 && st.leaderWins <= 0.82, `líder gana ${st.leaderWins}`);
+  assert.ok(st.comebacks >= 0.18, `remontadas ${st.comebacks}`);
+  assert.ok(st.avgTime >= 40 && st.avgTime <= 75, `duración ${st.avgTime}`);
 });
 
 test('bots competentes casi nunca mueren solos; los sabotajes son útiles pero no decisivos', () => {

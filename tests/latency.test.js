@@ -7,18 +7,20 @@ import { createClient } from '../src/net/client.js';
 import { CONFIG } from '../src/config.js';
 import { makeBot } from '../tools/botsim.js';
 
-CONFIG.RACE_SECONDS = 5;       // carreras cortas para el test (este fichero corre en su propio proceso)
+CONFIG.TRACK.LENGTH = 2600;    // pista corta para el test (este fichero corre en su propio proceso)
 CONFIG.COUNTDOWN_SECONDS = 0.5;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function run(latencyMs, { aggressive = false } = {}) {
-  const { a, b } = createLinkPair({ latencyMs });
+async function run(latencyMs, { aggressive = false, jitterMs = 0, lossRate = 0 } = {}) {
+  let seed = 12345; // rng determinista para jitter/pérdida
+  const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const { a, b } = createLinkPair({ latencyMs, jitterMs, lossRate, rng });
   const host = createHostSession({ link: a });
   const client = createClient({ link: b, name: 'G' });
   const evH = [], evC = [];
   host.onEvent = (e) => evH.push(e); client.onEvent = (e) => evC.push(e);
   const hb = makeBot({ seed: 5, aggressive }), cb = makeBot({ seed: 6, aggressive });
-  let prev = null, maxJump = 0, samples = 0;
+  let prev = null, prevR = null, prevT = 0, maxJump = 0, maxRivalJump = 0, samples = 0;
   const t0 = Date.now();
   while (!(evH.some((e) => e.kind === 'over') && evC.some((e) => e.kind === 'over')) && Date.now() - t0 < 15000) {
     await sleep(16);
@@ -33,10 +35,16 @@ async function run(latencyMs, { aggressive = false } = {}) {
         samples++;
       }
       prev = { x: c.x, y: c.y };
+      const r = v.cars[0], tn = Date.now();
+      if (prevR && v.phase === 'race') {
+        const dtS = (tn - prevT) / 1000;
+        maxRivalJump = Math.max(maxRivalJump, Math.hypot(r.x - prevR.x, r.y - prevR.y) - Math.hypot(r.vx, r.vy) * dtS * 1.5 - 12);
+      }
+      prevR = { x: r.x, y: r.y }; prevT = tn;
     }
   }
   const oh = evH.find((e) => e.kind === 'over'), oc = evC.find((e) => e.kind === 'over');
-  const out = { oh, oc, maxJump, samples, hostY: host.state.cars.map((c) => c.y), cliY: client.getView().cars.map((c) => c.y) };
+  const out = { oh, oc, maxJump, maxRivalJump, samples, hostY: host.state.cars.map((c) => c.y), cliY: client.getView().cars.map((c) => c.y) };
   host.stop();
   return out;
 }
@@ -58,4 +66,14 @@ test('latencia 100 ms con sabotajes: el misil/aceite/EMP se disparan por red y e
   const r = await run(100, { aggressive: true });
   assert.equal(r.oc.winner, r.oh.winner);
   assert.ok(r.maxJump < 150, `salto ${r.maxJump}`);
+});
+
+test('jitter 60-180 ms + 3 % de pérdida en el canal no fiable: sin saltos del coche propio ni del rival', async () => {
+  const r = await run(60, { jitterMs: 120, lossRate: 0.03 });
+  assert.ok(r.oh && r.oc, 'ambos reciben el fin de partida');
+  assert.equal(r.oc.winner, r.oh.winner, 'mismo ganador');
+  assert.ok(r.samples > 100);
+  assert.ok(r.maxJump < 60, `salto del coche propio ${r.maxJump.toFixed(1)} px`);
+  console.log('jitter: salto propio', r.maxJump.toFixed(1), 'rival', r.maxRivalJump.toFixed(1));
+  assert.ok(r.maxRivalJump < 60, `salto del rival interpolado ${r.maxRivalJump.toFixed(1)} px`);
 });

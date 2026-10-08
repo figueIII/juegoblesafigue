@@ -5,7 +5,7 @@ import { CONFIG } from '../config.js';
 import { mulberry32 } from './rng.js';
 import { trackCenterAt } from './track.js';
 
-const { CAR, SABOTAGE, TRACK } = CONFIG;
+const { CAR, SABOTAGE, TRACK, CATCHUP } = CONFIG;
 
 // Constantes DERIVADAS de CONFIG (no hay valor propio en config para ellas).
 const LAT_GRIP = CAR.TURN_RATE * 3;          // amortiguación lateral (1/s) con agarre normal
@@ -22,12 +22,11 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export function createState(track) {
   const cx = track.segments[0].cx;
   const off = track.width * 0.12;
-  const mk = (id, x) => ({ id, x, y: 0, angle: 0, vx: 0, vy: 0, hp: CAR.MAX_HP, slot: null, cooldown: 0, oilTimer: 0, empTimer: 0 });
+  const mk = (id, x) => ({ id, x, y: 0, angle: 0, vx: 0, vy: 0, hp: CAR.MAX_HP, slot: null, cooldown: 0, oilTimer: 0, empTimer: 0, boost: 0, turbo: false, turboCd: 0 });
   return {
     tick: 0,
     time: -CONFIG.COUNTDOWN_SECONDS,
     phase: 'countdown',
-    timeLeft: CONFIG.RACE_SECONDS,
     cars: [mk(0, cx - off), mk(1, cx + off)],
     projectiles: [],
     hazards: [],
@@ -39,7 +38,7 @@ export function createState(track) {
 
 export function cloneState(s) {
   return {
-    tick: s.tick, time: s.time, phase: s.phase, timeLeft: s.timeLeft,
+    tick: s.tick, time: s.time, phase: s.phase,
     cars: s.cars.map((c) => ({ ...c })),
     projectiles: s.projectiles.map((p) => ({ ...p })),
     hazards: s.hazards.map((h) => ({ ...h })),
@@ -134,13 +133,14 @@ function drive(state, car, inp, dt, track) {
   // ángulo: la parte que no se alinea se convierte en derrape y la amortigua el agarre lateral.
   let fx = Math.sin(car.angle), fy = -Math.cos(car.angle);
   let vf = car.vx * fx + car.vy * fy;
+  const topSpeed = CAR.MAX_SPEED * (1 + car.boost), accel = CAR.ACCEL * (1 + car.boost);
   car.angle += steer * CAR.TURN_RATE * dt * clamp(vf / (CAR.MAX_SPEED * 0.15), -1, 1);
   fx = Math.sin(car.angle); fy = -Math.cos(car.angle);
   const rx = Math.cos(car.angle), ry = Math.sin(car.angle);
   vf = car.vx * fx + car.vy * fy;
   let vl = car.vx * rx + car.vy * ry;
 
-  if (throttle > 0) vf += CAR.ACCEL * throttle * dt;
+  if (throttle > 0) vf += accel * throttle * dt;
   else if (throttle < 0) {
     if (vf > 0) vf = Math.max(0, vf + CAR.BRAKE * throttle * dt);
     else vf = Math.max(-REVERSE_MAX, vf + CAR.ACCEL * throttle * dt);
@@ -148,7 +148,7 @@ function drive(state, car, inp, dt, track) {
   vf -= vf * Math.min(1, CAR.DRAG * dt);
   const grip = LAT_GRIP * (car.oilTimer > 0 ? SABOTAGE.OIL.GRIP : 1);
   vl *= Math.exp(-grip * dt);
-  vf = clamp(vf, -REVERSE_MAX, CAR.MAX_SPEED);
+  vf = clamp(vf, -REVERSE_MAX, topSpeed);
 
   car.vx = fx * vf + rx * vl;
   car.vy = fy * vf + ry * vl;
@@ -230,8 +230,29 @@ function stepProjectiles(state, dt, track) {
   state.projectiles = alive;
 }
 
-function pickKind(id) {
-  return KINDS[Math.floor(mulberry32(id + 1)() * KINDS.length)];
+/** Tipo de pickup determinista: uniforme si va parejo; sesgado a favor del rezagado (misil) o del líder (aceite/EMP). */
+function pickKind(id, car, other) {
+  const r = mulberry32(id + 1)();
+  const d = car.y - other.y; // >0: el coche va por detrás
+  if (Math.abs(d) <= CATCHUP.PICKUP_BIAS_GAP) return KINDS[Math.floor(r * KINDS.length)];
+  const w = CATCHUP.PICKUP_WEIGHTS[d > 0 ? 'behind' : 'ahead'];
+  let acc = 0;
+  for (const k of KINDS) { acc += w[k]; if (r < acc) return k; }
+  return KINDS[KINDS.length - 1];
+}
+
+/** Remontada: bonus de velocidad al rezagado (proporcional a la distancia) y turbo (sabotaje automático) si la ventaja es enorme. */
+function applyCatchUp(state, dt) {
+  const [a, b] = state.cars;
+  const gap = Math.abs(a.y - b.y);
+  const f = clamp((gap - CATCHUP.START) / (CATCHUP.FULL - CATCHUP.START), 0, 1);
+  const behind = a.y > b.y ? a : a.y < b.y ? b : null;
+  for (const c of state.cars) {
+    c.turboCd = Math.max(0, c.turboCd - dt);
+    c.boost = behind === c ? f * CATCHUP.MAX_BONUS : behind ? 0 - f * CATCHUP.LEADER_PENALTY : 0;
+    c.turbo = behind === c && gap >= CATCHUP.TURBO_GAP;
+    if (c.turbo && !c.slot && c.turboCd <= 0) { c.slot = CATCHUP.TURBO_KIND; c.turboCd = CATCHUP.TURBO_COOLDOWN; }
+  }
 }
 
 function finish(state, winner, reason) {
@@ -249,7 +270,6 @@ export function step(state, inputs, dt, track) {
     if (state.time < 0) return state;
     state.phase = 'race';
   }
-  state.timeLeft = Math.max(0, CONFIG.RACE_SECONDS - state.time);
   const cars = state.cars;
   const inp = [normInput(inputs && inputs[0]), normInput(inputs && inputs[1])];
 
@@ -259,6 +279,7 @@ export function step(state, inputs, dt, track) {
     c.oilTimer = Math.max(0, c.oilTimer - dt);
     c.empTimer = Math.max(0, c.empTimer - dt);
   }
+  applyCatchUp(state, dt);
   for (const c of cars) fire(state, c, inp[c.id]);
   for (const c of cars) drive(state, c, inp[c.id], dt, track);
   carVsCar(cars[0], cars[1]);
@@ -267,7 +288,7 @@ export function step(state, inputs, dt, track) {
     carVsObstacles(c, track);
     if (!c.slot) {
       for (const p of state.pickups) {
-        if (!p.taken && Math.hypot(c.x - p.x, c.y - p.y) <= PICKUP_RADIUS) { p.taken = true; c.slot = pickKind(p.id); break; }
+        if (!p.taken && Math.hypot(c.x - p.x, c.y - p.y) <= PICKUP_RADIUS) { p.taken = true; c.slot = pickKind(p.id, c, cars[1 - c.id]); break; }
       }
     }
   }
@@ -281,10 +302,6 @@ export function step(state, inputs, dt, track) {
   if (f0 || f1) {
     const w = f0 && f1 ? (cars[0].y === cars[1].y ? 'draw' : cars[0].y < cars[1].y ? 0 : 1) : f0 ? 0 : 1;
     return finish(state, w, 'finish'), state;
-  }
-  if (state.timeLeft <= 0) {
-    const w = cars[0].y === cars[1].y ? 'draw' : cars[0].y < cars[1].y ? 0 : 1;
-    return finish(state, w, 'time'), state;
   }
   return state;
 }

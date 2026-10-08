@@ -2,14 +2,13 @@
 /**
  * GameState (producido por physics.createState / physics.step, consumido por render y snapshots):
  * {
- *   tick: number, time: number,            // segundos desde "GO"
+ *   tick: number, time: number,            // segundos desde "GO" (transcurrido; sin límite de tiempo)
  *   phase: 'countdown'|'race'|'over',
- *   timeLeft: number,
- *   cars: [ { id:0|1, x,y,angle,vx,vy, hp, slot:null|'missile'|'oil'|'emp', cooldown, oilTimer, empTimer } , ... ] // id 0 = host, 1 = invitado
+ *   cars: [ { id:0|1, x,y,angle,vx,vy, hp, slot:null|'missile'|'oil'|'emp', cooldown, oilTimer, empTimer, boost, turbo, turboCd } , ... ] // id 0 = host, 1 = invitado
  *   projectiles: [ { id, owner, x,y,vx,vy, ttl } ],
  *   hazards: [ { id, kind:'oil', x,y,r, ttl } ],
  *   pickups: [ { id, x,y, taken:boolean } ],
- *   winner: null|0|1|'draw', reason: null|'finish'|'destroyed'|'time'|'disconnect'
+ *   winner: null|0|1|'draw', reason: null|'finish'|'destroyed'|'disconnect'
  * }
  * Input: { seq, throttle:-1..1 (−1 = freno/marcha atrás), steer:-1..1, aim:[wx,wy] mundo, fire:boolean }
  * Track: { width, finishY, segments:[{y,cx}], obstacles:[{x,y,w,h}], pickups:[{x,y}] }  // Y negativo = avance
