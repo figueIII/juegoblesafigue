@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnóstico de conexión</title>
+<style>body{font:14px/1.5 system-ui;background:#0b0b1a;color:#e8e8ff;max-width:640px;margin:20px auto;padding:0 16px}
+pre{background:#14142b;padding:12px;border-radius:8px;white-space:pre-wrap}.ok{color:#5f5}.bad{color:#f66}button{padding:10px 16px;font-size:16px}</style></head>
+<body><h1>Diagnóstico de conexión</h1>
+<p>Prueba qué servidores STUN/TURN responden desde esta red. Ejecútalo en <b>ambos</b> ordenadores y compara. Para jugar entre redes distintas hace falta ver al menos un candidato <b>relay</b> (TURN) o <b>srflx</b> en ambos.</p>
+<button id="go">Ejecutar prueba</button><pre id="out">Pulsa el botón…</pre>
+<script type="module">
+import { CONFIG } from './src/config.js';
+const out = document.getElementById('out');
+const log = (t, c) => { out.innerHTML += (c ? `<span class="${c}">${t}</span>` : t) + '\n'; };
+async function probe(server) {
+  const label = [].concat(server.urls).join(', ');
+  const pc = new RTCPeerConnection({ iceServers: [server] });
+  pc.createDataChannel('x');
+  const types = new Set(); const errors = [];
+  pc.onicecandidate = (e) => { if (e.candidate) types.add(e.candidate.type); };
+  pc.onicecandidateerror = (e) => errors.push(`${e.errorCode} ${e.errorText || ''} (${e.url || ''})`);
+  await pc.setLocalDescription(await pc.createOffer());
+  await new Promise((r) => { const t = setTimeout(r, 8000); pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); r(); } }; });
+  pc.close();
+  const isTurn = /^turns?:/.test([].concat(server.urls)[0]);
+  const good = isTurn ? types.has('relay') : types.has('srflx');
+  log(`${good ? 'OK ' : 'FALLA'}  ${label}\n      candidatos: ${[...types].join(', ') || 'ninguno'}${errors.length ? '\n      errores: ' + errors.slice(0, 2).join(' | ') : ''}`, good ? 'ok' : 'bad');
+  return good;
+}
+document.getElementById('go').onclick = async () => {
+  out.textContent = 'Probando (hasta 8 s por servidor)…\n';
+  log('Navegador: ' + navigator.userAgent);
+  const results = [];
+  for (const s of CONFIG.ICE_SERVERS) results.push(await probe(s));
+  log(results.some(Boolean) ? '\nAl menos un servidor responde.' : '\nNingún servidor responde: tu red bloquea STUN/TURN.', results.some(Boolean) ? 'ok' : 'bad');
+};
+</script></body></html>
