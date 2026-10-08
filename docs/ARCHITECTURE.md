@@ -56,7 +56,7 @@ tests/               # node --test sobre shared/ (determinismo, colisiones)
 ## Conectividad / despliegue
 - Sala: el host muestra `https://<user>.github.io/<repo>/#<code>`; abrir el enlace une automáticamente. Peer id = `jbf-<code>` (4–6 chars).
 - ICE: STUN públicos (Google) + **TURN público de respaldo configurable** en `config.js` (≈10–15 % de NAT estrictos fallan sin TURN). Se documenta en README.
-- Pages: rama `main`, carpeta raíz, rutas **relativas** (`./src/...`). Sin Actions.
+- Pages: workflow `.github/workflows/pages.yml` (Source: GitHub Actions), rutas **relativas**, `.nojekyll`. PeerJS 1.5.4 con SRI y copia local de respaldo en `vendor/`.
 
 ## Agentes y contratos (orden de ejecución)
 **Fase 0 – Arquitecto (hecho):** este documento + `config.js` + firmas de `shared/protocol.js`.

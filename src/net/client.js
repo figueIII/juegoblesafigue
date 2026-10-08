@@ -65,10 +65,18 @@ export function createClient(o) {
     get rtt() { return link.rtt; },
     get lastAck() { return ackSeqSeen; },
     get pendingInputs() { return pending.length; },
-    onStart: o.onStart, onState: o.onState, onEvent: o.onEvent, onRematch: o.onRematch, onDisconnect: o.onDisconnect,
+    onStart: o.onStart, onState: o.onState, onRematch: o.onRematch, onDisconnect: o.onDisconnect,
     setInput(i) { curInput = sanitizeInput(i); },
     getView, requestRematch, stop,
   };
+
+  // Eventos que llegan antes de que main.js asigne onEvent (p.ej. 'sala llena') se guardan y se entregan al asignarlo.
+  let evHandler = o.onEvent || null; const earlyEvents = [];
+  Object.defineProperty(api, 'onEvent', {
+    enumerable: true,
+    get: () => evHandler,
+    set: (fn) => { evHandler = fn; if (fn) while (earlyEvents.length) fn(earlyEvents.shift()); },
+  });
 
   const ready = resolveShared(physics, genTrack).then((r) => { physics = r.physics; genTrack = r.generateTrack; });
   const clone = (s) => (physics.cloneState ? physics.cloneState(s) : JSON.parse(JSON.stringify(s)));
@@ -186,7 +194,7 @@ export function createClient(o) {
       over = true; overState = m.state || latest;
       if (m.state) latest = m.state;
     }
-    if (api.onEvent) api.onEvent(m);
+    if (api.onEvent) api.onEvent(m); else if (earlyEvents.length < 20) earlyEvents.push(m);
   });
   link.on(MSG.REMATCH, () => { if (api.onRematch) api.onRematch(); });
 

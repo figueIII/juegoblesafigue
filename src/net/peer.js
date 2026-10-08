@@ -44,6 +44,18 @@ export function peerErrorMessage(err) {
   }
 }
 
+const PEERJS_MISSING = 'No se pudo cargar PeerJS (la librería de conexión P2P). Comprueba tu conexión a Internet, desactiva el bloqueador de anuncios/scripts para este sitio o prueba otra red, y recarga la página.';
+
+/** Espera a que el global `Peer` exista (el <script> del CDN o su copia local de ./vendor puede tardar). */
+export async function waitForPeerJS(timeoutMs = 8000) {
+  const t0 = nowMs();
+  while (!globalThis.Peer) {
+    if (nowMs() - t0 > timeoutMs) throw Object.assign(new Error(PEERJS_MISSING), { kind: 'generic' });
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return globalThis.Peer;
+}
+
 // ---------------------------------------------------------------------------
 // Link: enlace lógico entre los dos jugadores.
 // Canal (interfaz mínima): { send(str), close(), isOpen(), onData: fn(str), onClose: fn() }
@@ -169,8 +181,8 @@ const connOptions = (ch) => ({ reliable: ch === 'ctrl', serialization: 'raw', me
  * @returns {Promise<{code, peerId, onGuest(fn), onError(fn), close()}>}
  * onGuest(fn) recibe un Link cuando el invitado conecta (se reenvía si ya conectó). Solo se admite 1 invitado.
  */
-export async function createHost({ PeerCtor = globalThis.Peer, linkOptions = {}, maxAttempts = 6 } = {}) {
-  if (!PeerCtor) throw new Error('PeerJS no está cargado (falta el script CDN).');
+export async function createHost({ PeerCtor, linkOptions = {}, maxAttempts = 6 } = {}) {
+  if (!PeerCtor) PeerCtor = await waitForPeerJS();
   let lastErr;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const code = generateCode();
@@ -223,7 +235,11 @@ function openHostPeer(PeerCtor, code, peerId, linkOptions) {
     peer.on('connection', (conn) => {
       const chName = (conn.metadata && conn.metadata.ch) || 'ctrl';
       if (guestPeerId && conn.peer !== guestPeerId) { // sala llena
-        conn.on('open', () => { try { conn.send(encode('error', { message: 'La sala ya está llena.' })); } catch {} setTimeout(() => conn.close(), 100); });
+        conn.on('open', () => {
+          // Solo el canal de control avisa (el cliente muestra el mensaje); da tiempo a que el invitado cargue sus módulos.
+          if (chName === 'ctrl') { try { conn.send(encode(MSG.EVENT, { kind: 'error', message: 'La sala ya está llena: ya hay otro jugador conectado.' })); } catch {} }
+          setTimeout(() => { try { conn.close(); } catch {} }, chName === 'ctrl' ? 1500 : 100);
+        });
         return;
       }
       guestPeerId = conn.peer;
@@ -247,10 +263,14 @@ function openHostPeer(PeerCtor, code, peerId, linkOptions) {
 /**
  * Se une a una sala por código. Resuelve con un Link ya abierto.
  */
-export function join(rawCode, { PeerCtor = globalThis.Peer, linkOptions = {}, connectTimeoutMs = 15000, fastWaitMs = 4000 } = {}) {
+export async function join(rawCode, opts = {}) {
+  return joinWith(rawCode, { ...opts, PeerCtor: opts.PeerCtor || (await waitForPeerJS()) });
+}
+
+function joinWith(rawCode, { PeerCtor, linkOptions = {}, connectTimeoutMs = 15000, fastWaitMs = 4000 } = {}) {
   const code = normalizeCode(rawCode);
   return new Promise((resolve, reject) => {
-    if (!PeerCtor) return reject(new Error('PeerJS no está cargado (falta el script CDN).'));
+    if (!PeerCtor) return reject(new Error(PEERJS_MISSING));
     if (!isValidCode(code)) return reject(new Error('Código de sala no válido.'));
     let peer;
     try { peer = new PeerCtor(undefined, peerBaseOptions()); } catch (e) { return reject(new Error(peerErrorMessage(e))); }

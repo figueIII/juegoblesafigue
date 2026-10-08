@@ -273,3 +273,6 @@ window.addEventListener('hashchange', () => {
   const code = normalizeCode(location.hash.slice(1));
   if (state === S.LOBBY && isValidCode(code) && role == null) joinRoom(code);
 });
+
+// Gancho de depuración/QA de solo lectura (usado por tests/e2e).
+Object.defineProperty(window, '__game', { value: { get role() { return role; }, get uiState() { return state; }, get sess() { return sess; } } });

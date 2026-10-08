@@ -48,7 +48,7 @@ export function createLobby(root, h) {
         el('div', { class: 'divider' }, 'o'),
         el('div', { class: 'row' }, input, joinBtn),
         notice ? el('p', { class: 'muted' }, notice) : null,
-        el('p', { class: 'muted' }, 'WASD / flechas para conducir. Ratón para apuntar, clic para disparar.'),
+        el('p', { class: 'muted' }, 'WASD / flechas para conducir. Ratón para apuntar, clic para disparar. En móvil: botones en pantalla y toca para apuntar y disparar.'),
       );
       if (warnings.length) {
         p.append(el('div', { class: 'warn' }, 'Módulos no disponibles: ' + warnings.join(', ')));

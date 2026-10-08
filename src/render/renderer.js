@@ -412,9 +412,11 @@ export function createRenderer(canvas) {
     ctx.save(); ctx.fillStyle = 'rgba(2,4,12,0.62)'; ctx.fillRect(0, 0, view.w, view.h);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = font(Math.min(view.w * 0.11, 90)); ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 30;
-    ctx.fillText(title, view.w / 2, view.h * 0.42); ctx.shadowBlur = 0;
+    // El panel de resultados (DOM) ocupa la parte inferior: el cartel va arriba para no solaparse.
+    const ty = Math.min(view.h * 0.25, 190);
+    ctx.fillText(title, view.w / 2, ty); ctx.shadowBlur = 0;
     ctx.font = font(18, 'normal'); ctx.fillStyle = COL.text;
-    if (state.reason) ctx.fillText(reasons[state.reason] || state.reason, view.w / 2, view.h * 0.42 + 56);
+    if (state.reason) ctx.fillText(reasons[state.reason] || state.reason, view.w / 2, ty + 50);
     ctx.restore();
   }
 
