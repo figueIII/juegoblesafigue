@@ -64,3 +64,6 @@ input.link { letter-spacing: 0; font-size: .85rem; text-transform: none; text-al
 
 #toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); padding: 8px 14px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 999px; font-size: .85rem; pointer-events: none !important; }
+
+/* Resultado: panel abajo para no tapar el cartel de fin del canvas */
+#ui.result { align-items: flex-end; padding-bottom: 3vh; }

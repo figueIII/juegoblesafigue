@@ -1,8 +1,7 @@
 // Arranque y máquina de estados: LOBBY → COUNTDOWN → RACE → RESULT.
-// Los módulos de otros agentes se cargan dinámicamente a través de la capa de ADAPTADORES
-// (más abajo). Las APIs asumidas están documentadas en README.md ("Contratos asumidos").
+// La capa de ADAPTADORES es la única zona que toca los módulos de red/render/input.
+// El host (net/host.js) gestiona internamente hello/start y la revancha; el cliente (net/client.js) igual.
 import { CONFIG } from './config.js';
-import { MSG, encode, decode } from './shared/protocol.js';
 import { createLobby, normalizeCode, isValidCode } from './ui/lobby.js';
 
 /* ===================== ADAPTADORES (única zona que toca módulos ajenos) ===================== */
@@ -40,17 +39,12 @@ function need(mod, fn, file) {
 }
 
 const adapters = {
-  // → Promise<Link> con .code. Link: on(evt, cb) evt ∈ 'open'|'message'|'close'|'error', send(obj), close()
+  // → Promise<{code, onGuest(fn(link)), onError(fn(msg)), close()}>
   async createHost() { return need(await load('peer'), 'createHost', 'net/peer.js')(); },
-  // → Promise<Link> resuelta cuando el canal está abierto
+  // → Promise<Link>
   async join(code) { return need(await load('peer'), 'join', 'net/peer.js')(code); },
-  // → Game { track, myId, getState(), drainEvents(), onOver(cb), stop() }
-  async createGame({ role, link, seed, input }) {
-    if (role === 'host') {
-      return need(await load('host'), 'createHostGame', 'net/host.js')({ link, seed, input, config: CONFIG });
-    }
-    return need(await load('client'), 'createClientGame', 'net/client.js')({ link, seed, input, config: CONFIG });
-  },
+  async createHostSession(link) { return need(await load('host'), 'createHostSession', 'net/host.js')({ link }); },
+  async createClient(link) { return need(await load('client'), 'createClient', 'net/client.js')({ link, name: 'Invitado' }); },
   async createRenderer(canvas) { return need(await load('renderer'), 'createRenderer', 'render/renderer.js')(canvas); },
   async createInput(canvas, getCameraToWorld) {
     return need(await load('input'), 'createInput', 'input/input.js')(canvas, getCameraToWorld);
@@ -61,7 +55,8 @@ const adapters = {
 /* ===================== Estado ===================== */
 const S = { LOBBY: 'LOBBY', COUNTDOWN: 'COUNTDOWN', RACE: 'RACE', RESULT: 'RESULT' };
 const canvas = document.getElementById('game');
-const lobby = createLobby(document.getElementById('ui'), {
+const uiRoot = document.getElementById('ui');
+const lobby = createLobby(uiRoot, {
   onCreate: () => createRoom(),
   onJoin: (code) => joinRoom(code),
   onRematch: () => requestRematch(),
@@ -71,28 +66,33 @@ const lobby = createLobby(document.getElementById('ui'), {
 
 let state = S.LOBBY;
 let role = null;        // 'host' | 'guest'
+let hostRoom = null;    // handle de createHost()
 let link = null;
-let game = null;
+let sess = null;        // HostSession | Client
 let renderer = null;
 let input = null;
+let inputTimer = null;
+let events = [];        // eventos pendientes para el renderer
 let session = 0;        // invalida callbacks de sesiones anteriores
-let rematch = { me: false, rival: false };
-let countdownTimer = null;
-let result = null;
+let rivalWantsRematch = false;
+let resultTimer = null;
 
 const JOIN_TIMEOUT_MS = 15000;
+const myId = () => (role === 'host' ? 0 : 1);
 const roomUrl = (code) => `${location.origin}${location.pathname}#${code}`;
-const send = (type, data) => { try { link && link.send(JSON.parse(encode(type, data))); } catch (e) { console.warn('[main] send', e); } };
 
 /* ===================== Navegación ===================== */
 function teardown() {
   session++;
-  clearInterval(countdownTimer);
-  try { game && game.stop && game.stop(); } catch (e) { console.warn(e); }
+  clearInterval(inputTimer); inputTimer = null;
+  clearTimeout(resultTimer);
+  try { sess && sess.stop && sess.stop(); } catch (e) { console.warn(e); }
   try { input && input.destroy && input.destroy(); } catch (e) { console.warn(e); }
   try { link && link.close && link.close(); } catch (e) { console.warn(e); }
-  game = null; input = null; link = null; role = null; result = null;
-  rematch = { me: false, rival: false };
+  try { hostRoom && hostRoom.close && hostRoom.close(); } catch (e) { console.warn(e); }
+  sess = null; input = null; link = null; hostRoom = null; role = null; events = [];
+  rivalWantsRematch = false;
+  uiRoot.classList.remove('result');
 }
 
 function toMenu(opts = {}) {
@@ -111,12 +111,6 @@ function fail(err, kind, retry) {
   lobby.showError(msg, { kind: k, retry });
 }
 
-function wireLink(mySession) {
-  link.on('message', (raw) => { if (mySession === session) onMessage(decode(raw)); });
-  link.on('close', () => { if (mySession === session) onDisconnect(); });
-  link.on('error', (e) => { if (mySession === session) onLinkError(e); });
-}
-
 /* ===================== Crear / unirse ===================== */
 async function createRoom() {
   teardown();
@@ -124,17 +118,29 @@ async function createRoom() {
   role = 'host';
   lobby.showConnecting('Creando sala…');
   try {
-    link = await adapters.createHost();
-    if (my !== session) return;
-    if (!link.code) throw new Error('createHost() no devolvió un código de sala.');
-    wireLink(my);
-    history.replaceState(null, '', '#' + link.code);
-    lobby.showWaiting(link.code, roomUrl(link.code));
-    link.on('open', () => {
-      if (my !== session) return;
-      lobby.showConnecting('Rival encontrado, preparando…');
-    });
+    const room = await adapters.createHost();
+    if (my !== session) { try { room.close(); } catch {} return; }
+    hostRoom = room;
+    if (!room.code) throw new Error('createHost() no devolvió un código de sala.');
+    room.onError((msg) => { if (my === session) fail(new Error(msg), 'nat'); });
+    room.onGuest((l) => { if (my === session && !sess) onGuestLink(l, my); });
+    history.replaceState(null, '', '#' + room.code);
+    lobby.showWaiting(room.code, roomUrl(room.code));
   } catch (e) { if (my === session) fail(e, 'nat', () => createRoom()); }
+}
+
+async function onGuestLink(l, my) {
+  link = l;
+  lobby.showConnecting('Rival encontrado, preparando…');
+  try {
+    sess = await adapters.createHostSession(l);
+  } catch (e) { if (my === session) fail(e, 'generic'); return; }
+  if (my !== session) return;
+  sess.onStart = () => { if (my === session) beginRound(my); };
+  sess.onEvent = (ev) => { if (my === session) onGameEvent(ev); };
+  sess.onRematch = () => { if (my === session) onRivalRematch(); };
+  sess.onDisconnect = (reason, msg) => { if (my === session) onDisconnect(reason, msg); };
+  sess.onWarning = (msg) => { if (my === session) lobby.toast(msg); };
 }
 
 async function joinRoom(rawCode) {
@@ -150,154 +156,117 @@ async function joinRoom(rawCode) {
       timer = setTimeout(() => rej(Object.assign(new Error(
         'La conexión tardó demasiado. Puede que la sala ya no exista o que la red bloquee la conexión directa.'), { kind: 'nat' })), JOIN_TIMEOUT_MS);
     });
-    link = await Promise.race([adapters.join(code), timeout]);
+    const l = await Promise.race([adapters.join(code), timeout]);
     clearTimeout(timer);
-    if (my !== session) { try { link.close(); } catch {} return; }
-    wireLink(my);
-    send(MSG.HELLO, { v: CONFIG.VERSION, name: 'Invitado' });
+    if (my !== session) { try { l.close(); } catch {} return; }
+    link = l;
+    sess = await adapters.createClient(l);   // envía hello y reintenta hasta recibir start
+    if (my !== session) return;
+    sess.onStart = () => { if (my === session) beginRound(my); };
+    sess.onEvent = (ev) => { if (my === session) onGameEvent(ev); };
+    sess.onRematch = () => { if (my === session) onRivalRematch(); };
+    sess.onDisconnect = (reason, msg) => { if (my === session) onDisconnect(reason, msg); };
     lobby.showConnecting('Conectado, esperando al anfitrión…');
   } catch (e) {
     clearTimeout(timer);
     if (my !== session) return;
-    const t = e && (e.type || e.kind);
-    if (t === 'peer-unavailable') {
+    if (e && e.type === 'peer-unavailable') {
       e = Object.assign(new Error(`No existe la sala ${code}. Revisa el código o pide un enlace nuevo.`), { kind: 'notfound' });
-    } else if (t === 'webrtc' || t === 'network' || t === 'socket-error' || t === 'server-error') {
-      e = Object.assign(new Error('No se pudo contactar con el servicio de conexión (PeerJS). Revisa tu internet.'), { kind: 'generic' });
     }
     fail(e, 'nat', () => joinRoom(code));
   }
 }
 
-/* ===================== Mensajes de red ===================== */
-function onMessage(m) {
-  if (!m || !m.type) return;
-  switch (m.type) {
-    case MSG.HELLO:
-      if (role !== 'host') return;
-      if (m.v !== CONFIG.VERSION) return fail(new Error('Tu rival usa otra versión del juego. Recarga la página.'), 'generic');
-      startRace();
-      break;
-    case MSG.START:
-      if (role !== 'guest') return;
-      beginCountdown(m.seed, m.countdown ?? CONFIG.COUNTDOWN_SECONDS);
-      break;
-    case MSG.REMATCH:
-      rematch.rival = true;
-      if (state === S.RESULT) {
-        lobby.setRematchStatus(rematch.me ? 'Empezando…' : 'El rival quiere revancha.');
-        maybeRestart();
-      }
-      break;
-    default: break; // snap/input/event/ping/pong los gestionan host.js y client.js
-  }
+/* ===================== Eventos de partida ===================== */
+function onGameEvent(ev) {
+  if (!ev) return;
+  if (ev.kind === 'error') return fail(new Error(ev.message || 'Error del anfitrión.'), 'generic');
+  events.push(ev);
+  if (events.length > 200) events.shift();
+  if (ev.kind === 'over') scheduleResult({ winner: ev.winner, reason: ev.reason });
 }
 
-function onDisconnect() {
+function onRivalRematch() {
+  rivalWantsRematch = true;
+  if (state === S.RESULT) lobby.setRematchStatus('El rival quiere revancha.');
+}
+
+function onDisconnect(reason, msg) {
   if (state === S.LOBBY) {
-    if (role === 'host') return; // la sala sigue abierta hasta que se cancele
-    return fail(new Error('Se perdió la conexión con la sala.'), 'nat');
+    if (role === 'host') return;
+    return fail(new Error(msg || 'Se perdió la conexión con la sala.'), 'nat');
   }
   if (state === S.RESULT) { lobby.setRematchStatus('El rival se ha desconectado.'); const b = document.getElementById('btn-rematch'); if (b) b.disabled = true; return; }
   // En carrera/cuenta atrás: victoria por abandono
-  showResult({ winner: role === 'host' ? 0 : 1, reason: 'disconnect' });
-}
-
-function onLinkError(e) {
-  console.warn('[main] link error', e);
-  if (state === S.LOBBY || state === S.COUNTDOWN) {
-    const t = e && e.type;
-    if (t === 'webrtc' || t === 'negotiation') fail(Object.assign(new Error('No se pudo establecer la conexión directa entre navegadores.'), { kind: 'nat' }), 'nat');
-  }
+  showResult({ winner: myId(), reason: 'disconnect' });
 }
 
 /* ===================== Partida ===================== */
-function startRace() { // solo host
-  if (!link) return;
-  const seed = (Math.random() * 0xffffffff) >>> 0;
-  send(MSG.START, { seed, countdown: CONFIG.COUNTDOWN_SECONDS });
-  beginCountdown(seed, CONFIG.COUNTDOWN_SECONDS);
-}
-
-async function beginCountdown(seed, seconds) {
-  const my = session;
-  clearInterval(countdownTimer);
-  try { game && game.stop && game.stop(); } catch {}
-  rematch = { me: false, rival: false };
-  result = null;
+async function beginRound(my) {
+  clearTimeout(resultTimer);
+  uiRoot.classList.remove('result');
+  rivalWantsRematch = false;
+  events = [];
   state = S.COUNTDOWN;
+  lobby.hideCountdown();
+  lobby.hideAll();
   try {
     if (!renderer) renderer = await adapters.createRenderer(canvas);
     if (my !== session) return;
-    input = await adapters.createInput(canvas, () => (renderer.getCameraToWorld ? renderer.getCameraToWorld() : null));
-    game = await adapters.createGame({ role, link, seed, input });
-    if (my !== session) return;
-    game.onOver && game.onOver((r) => { if (my === session) showResult(r); });
+    renderer.resetCamera && renderer.resetCamera();
+    if (!input) {
+      input = await adapters.createInput(canvas, (sx, sy) => renderer.getCameraToWorld(sx, sy));
+      if (my !== session) { input.destroy && input.destroy(); input = null; return; }
+    }
   } catch (e) { if (my === session) fail(e, 'generic'); return; }
+  clearInterval(inputTimer);
+  inputTimer = setInterval(() => { if (input && sess) sess.setInput(input.sample(0)); }, 1000 / CONFIG.INPUT_HZ);
+  canvas.focus();
+  if (!looping) { looping = true; requestAnimationFrame(frame); }
+}
 
-  let n = Math.max(1, Math.round(seconds));
-  lobby.showCountdown(n);
-  countdownTimer = setInterval(() => {
-    if (my !== session) return clearInterval(countdownTimer);
-    n--;
-    if (n > 0) return lobby.showCountdown(n);
-    clearInterval(countdownTimer);
-    lobby.showCountdown('GO');
-    state = S.RACE;
-    setTimeout(() => { if (my === session && state === S.RACE) lobby.hideCountdown(); }, 700);
-  }, 1000);
-  requestAnimationFrame(frame);
+function scheduleResult(r) {
+  if (state === S.RESULT) return;
+  clearTimeout(resultTimer);
+  const my = session;
+  // Pequeña pausa para que se vea el cartel de fin del renderer antes del panel.
+  resultTimer = setTimeout(() => { if (my === session) showResult(r); }, 900);
 }
 
 function showResult(r) {
   if (state === S.RESULT) return;
+  clearTimeout(resultTimer);
   state = S.RESULT;
-  result = r;
-  const myId = role === 'host' ? 0 : 1;
-  const outcome = r.winner === 'draw' || r.winner == null ? 'draw' : (r.winner === myId ? 'win' : 'lose');
+  const me = myId();
+  const outcome = r.winner === 'draw' || r.winner == null ? 'draw' : (r.winner === me ? 'win' : 'lose');
+  uiRoot.classList.add('result');
   lobby.showResult({ outcome, reason: r.reason || '' });
+  if (rivalWantsRematch && r.reason !== 'disconnect') lobby.setRematchStatus('El rival quiere revancha.');
 }
 
 function requestRematch() {
-  rematch.me = true;
-  send(MSG.REMATCH, {});
-  lobby.setRematchStatus(rematch.rival ? 'Empezando…' : 'Esperando al rival…');
-  maybeRestart();
-}
-
-function maybeRestart() {
-  if (role === 'host' && rematch.me && rematch.rival) startRace();
+  if (!sess) return;
+  sess.requestRematch();
+  lobby.setRematchStatus(rivalWantsRematch ? 'Empezando…' : 'Esperando al rival…');
 }
 
 /* ===================== Bucle de render ===================== */
-function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.floor(window.innerWidth * dpr), h = Math.floor(window.innerHeight * dpr);
-  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-  renderer && renderer.resize && renderer.resize(w, h, dpr);
-}
-window.addEventListener('resize', resize);
-
+let looping = false;
 function frame() {
-  if (!game || (state !== S.COUNTDOWN && state !== S.RACE && state !== S.RESULT)) return;
+  if (!sess || !renderer || (state !== S.COUNTDOWN && state !== S.RACE && state !== S.RESULT)) { looping = false; return; }
   try {
-    const st = game.getState();
-    if (st && st.phase === 'over' && state === S.RACE) {
-      showResult({ winner: st.winner, reason: st.reason });
-    }
-    renderer.draw(st, game.track, game.myId, game.drainEvents ? game.drainEvents() : []);
-  } catch (e) { console.error('[main] render', e); return fail(e, 'generic'); }
+    const st = role === 'host' ? sess.state : sess.getView();
+    if (st && state === S.COUNTDOWN && st.phase === 'race') state = S.RACE;
+    if (st && sess.track) renderer.draw(st, sess.track, myId(), events.splice(0));
+  } catch (e) { console.error('[main] render', e); looping = false; return fail(e, 'generic'); }
   requestAnimationFrame(frame);
 }
 
 /* ===================== Arranque ===================== */
 (async function boot() {
-  resize();
   await adapters.probe();
   const hash = normalizeCode(location.hash.slice(1));
-  if (hash) {
-    if (isValidCode(hash)) return joinRoom(hash);
-  }
+  if (hash && isValidCode(hash)) return joinRoom(hash);
   toMenu();
 })();
 window.addEventListener('hashchange', () => {
