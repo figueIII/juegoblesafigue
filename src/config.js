@@ -22,7 +22,16 @@ export const CONFIG = {
   },
 
   // Servidores ICE. Añadir aquí un TURN propio/gratuito para NAT estrictos.
-  ICE_SERVERS: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }],
+  // OJO: pasar `config.iceServers` a PeerJS REEMPLAZA sus servidores por defecto, así que se repiten aquí
+  // (STUN + TURN públicos de PeerJS) y se añade un TURN público de respaldo. Sin TURN, las redes estrictas
+  // (4G, wifi de empresa, NAT simétrico) no pueden conectar.
+  ICE_SERVERS: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+    { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
+      username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
   PEER_OPTIONS: {}, // p.ej. { host, port, path } para un broker PeerJS propio
   PEER_PREFIX: 'jbf-',
 };
