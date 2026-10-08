@@ -8,7 +8,7 @@
 | Pista | Procedural por `seed` (mulberry32) compartida en el handshake |
 | Sabotajes | Misil, mancha de aceite, EMP. Se consiguen con pickups; apuntado con ratón |
 | Arte | Cenital, vectorial, neón, sin assets externos |
-| Victoria | Primero en cruzar meta; a los 60 s gana el más adelantado; HP 0 = derrota |
+| Victoria | Primero en cruzar meta (sin límite de tiempo); HP 0 = derrota, ambos a 0 = empate |
 
 ## Estructura
 ```
@@ -23,7 +23,7 @@ src/
     protocol.js      # tipos de mensaje + (de)serialización
   net/
     peer.js          # wrapper PeerJS: host(), join(code), send/on, ping
-    host.js          # bucle autoritativo 60 Hz, snapshots 20 Hz
+    host.js          # bucle autoritativo 60 Hz, snapshots 30 Hz
     client.js        # input 60 Hz, predicción, reconciliación, interpolación del rival
   render/
     renderer.js      # cámara que sigue al propio coche, pista, coches, efectos, HUD
@@ -34,17 +34,17 @@ tests/               # node --test sobre shared/ (determinismo, colisiones)
 ```
 
 ## Modelo de juego
-- Mundo vertical, la meta está en `y = finishY` (≈ 60 s a velocidad media). Eje Y negativo = avance.
+- Mundo vertical, la meta está en `y = finishY` (≈ 55 s a velocidad media). Eje Y negativo = avance.
 - Coche: posición, ángulo, velocidad, HP (100), cooldown, ranura de sabotaje (1 slot).
 - Colisión coche-coche: rectángulos orientados, SAT + impulso con masa igual y restitución `config.CAR_BOUNCE`; daño proporcional al impulso normal.
 - Obstáculos y bordes de pista: daño + rebote. Fuera de pista (hierba) = fricción alta.
 - Sabotajes (config): **Misil** (proyectil recto, empuje + daño), **Aceite** (charco ~4 s, pierde agarre), **EMP** (1.5 s controles invertidos al rival, alcance con ratón).
-- Muerte súbita: HP 0 → derrota inmediata. Empate en 60 s → mayor `-y`.
+- Muerte súbita: HP 0 → derrota inmediata.
 
 ## Protocolo (JSON compacto sobre DataChannel fiable+ordenado; snapshots en canal no fiable si PeerJS `reliable:false`)
 - `hello {v, name}` / `start {seed, t0}` (host→guest)
 - `input {seq, throttle, steer, brake, aim:[x,y], fire}` (guest→host, 60 Hz)
-- `snap {tick, ackSeq, cars:[…], proj:[…], hazards:[…], pickups:[…], hp, timeLeft}` (host→guest, 20 Hz)
+- `snap {tick, ackSeq, cars:[…], proj:[…], hazards:[…], pickups:[…], hp}` (host→guest, 30 Hz)
 - `event {kind, …}` (impacto, disparo, fin de carrera) – fiable
 - `ping/pong` para RTT. Timeout de 5 s sin paquetes → derrota por desconexión.
 

@@ -314,13 +314,16 @@ function joinWith(rawCode, { PeerCtor, linkOptions = {}, connectTimeoutMs = 1500
 // Utilidades para tests / modo local: canales en memoria.
 // ---------------------------------------------------------------------------
 class MemChannel {
-  constructor(latencyMs) { this.latencyMs = latencyMs; this.open = true; this.onData = null; this.onClose = null; this.other = null; this.blackhole = false; }
+  // jitterMs: la latencia de cada mensaje se sortea en [latencyMs, latencyMs+jitterMs] (puede reordenar); lossRate: prob. de pérdida.
+  constructor(latencyMs, { jitterMs = 0, lossRate = 0, rng = Math.random } = {}) { this.latencyMs = latencyMs; this.jitterMs = jitterMs; this.lossRate = lossRate; this.rng = rng; this.open = true; this.onData = null; this.onClose = null; this.other = null; this.blackhole = false; }
   isOpen() { return this.open; }
   send(s) {
     if (!this.open || this.blackhole) return;
     const o = this.other;
+    if (this.lossRate > 0 && this.rng() < this.lossRate) return;
     const deliver = () => { if (o.open && o.onData) o.onData(s); };
-    if (this.latencyMs > 0) setTimeout(deliver, this.latencyMs); else queueMicrotask(deliver);
+    const d = this.latencyMs + (this.jitterMs > 0 ? this.rng() * this.jitterMs : 0);
+    if (d > 0) setTimeout(deliver, d); else queueMicrotask(deliver);
   }
   close() {
     if (!this.open) return;
@@ -330,16 +333,16 @@ class MemChannel {
   }
 }
 
-export function createMemoryChannelPair({ latencyMs = 0 } = {}) {
-  const a = new MemChannel(latencyMs), b = new MemChannel(latencyMs);
+export function createMemoryChannelPair({ latencyMs = 0, ...net } = {}) {
+  const a = new MemChannel(latencyMs, net), b = new MemChannel(latencyMs, net);
   a.other = b; b.other = a;
   return [a, b];
 }
 
 /** Dos Links conectados en memoria (host=a, guest=b), con canal fiable y no fiable. */
-export function createLinkPair({ latencyMs = 0, ...linkOptions } = {}) {
-  const [ca, cb] = createMemoryChannelPair({ latencyMs });
-  const [fa, fb] = createMemoryChannelPair({ latencyMs });
+export function createLinkPair({ latencyMs = 0, jitterMs = 0, lossRate = 0, rng, ...linkOptions } = {}) {
+  const [ca, cb] = createMemoryChannelPair({ latencyMs }); // canal fiable: sin jitter ni pérdida (conserva el orden)
+  const [fa, fb] = createMemoryChannelPair({ latencyMs, jitterMs, lossRate, ...(rng ? { rng } : {}) });
   const a = new Link(linkOptions), b = new Link(linkOptions);
   a.addChannel('ctrl', ca); b.addChannel('ctrl', cb);
   a.addChannel('fast', fa); b.addChannel('fast', fb);

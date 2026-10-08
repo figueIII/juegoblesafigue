@@ -18,7 +18,7 @@ export function interpolateCar(a, b, alpha) {
  * Muestrea el coche `idx` en el instante `serverMs` a partir del buffer ordenado
  * [{t (ms de servidor), state}]. Extrapola ≤ maxExtrapMs con la velocidad si falta futuro.
  */
-export function sampleCar(snaps, serverMs, idx, maxExtrapMs = 150) {
+export function sampleCar(snaps, serverMs, idx, maxExtrapMs = 200) {
   if (!snaps.length) return null;
   const first = snaps[0], last = snaps[snaps.length - 1];
   if (serverMs <= first.t) return { ...first.state.cars[idx] };
@@ -48,13 +48,15 @@ export function createClient(o) {
   const MY = 1, RIVAL = 0;
   const dt = 1 / config.INPUT_HZ;
   const now = o.now || nowMs;
-  const errTau = 0.1;       // s: constante de decaimiento de la corrección visual
-  const errSnap = 150;      // px: error mayor => teleport sin suavizar
+  const errTau = 0.12;      // s: constante de decaimiento de la corrección visual
+  const errSnap = 220;      // px: error mayor => teleport sin suavizar
   let physics = o.physics, genTrack = o.generateTrack;
 
   let track = null, pred = null, latest = null, overState = null;
   let pending = [], seq = 0, curInput = { ...NEUTRAL_INPUT };
   let snaps = [], offset = null, lastTick = -1;
+  let jitter = 0;           // ms: media móvil de lo tarde que llegan los snapshots respecto al más rápido
+  let renderT = null, renderNow = 0; // reloj de interpolación del rival (monótono y suavizado)
   let err = { x: 0, y: 0, angle: 0 };
   let timer = null, lastT = 0, acc = 0, started = false, over = false, helloTimer = null;
   let ackSeqSeen = 0;
@@ -91,7 +93,7 @@ export function createClient(o) {
     track = genTrack(seed);
     pred = physics.createState(track);
     latest = null; overState = null; over = false;
-    pending = []; snaps = []; offset = null; lastTick = -1;
+    pending = []; snaps = []; offset = null; lastTick = -1; jitter = 0; renderT = null;
     err = { x: 0, y: 0, angle: 0 };
     ackSeqSeen = 0;
   }
@@ -108,6 +110,7 @@ export function createClient(o) {
     const t = (m.tick * 1000) / config.PHYSICS_HZ, tNow = now();
     const sample = tNow - t;
     offset = offset == null ? sample : sample < offset ? sample : offset + (sample - offset) * 0.02;
+    jitter += (Math.max(0, sample - offset) - jitter) * 0.1;
     snaps.push({ t, state: S });
     if (snaps.length > 40) snaps.shift();
     latest = S;
@@ -151,6 +154,23 @@ export function createClient(o) {
     if (n && api.onState) { const v = getView(); if (v) api.onState(v); }
   }
 
+  /**
+   * Reloj (ms de servidor) con el que se interpola al rival. Retardo = base + 2*jitter (acotado). El reloj avanza
+   * con el tiempo real y solo corrige hacia el objetivo con una pendiente limitada (±15 %): sin saltos ni retrocesos.
+   */
+  function rivalClock() {
+    const t = now();
+    const delay = Math.min(config.INTERP_MAX_DELAY_MS || 220, config.INTERP_DELAY_MS + 2 * jitter);
+    const target = t - offset - delay;
+    if (renderT == null || Math.abs(target - renderT) > 500) renderT = target;
+    else {
+      const adv = Math.max(0, t - renderNow);
+      renderT += adv + Math.max(-0.15 * adv, Math.min(0.15 * adv, target - renderT - adv));
+    }
+    renderNow = t;
+    return renderT;
+  }
+
   /** Vista para renderizar: cars[1] = propio (predicho), cars[0] = rival (interpolado). */
   function getView() {
     if (!pred) return null;
@@ -158,12 +178,12 @@ export function createClient(o) {
     const cars = [];
     const own = { ...pred.cars[MY], ...displayedOwn() };
     cars[MY] = own;
-    let rival = latest && offset != null ? sampleCar(snaps, now() - offset - config.INTERP_DELAY_MS, RIVAL) : null;
+    let rival = latest && offset != null ? sampleCar(snaps, rivalClock(), RIVAL) : null;
     cars[RIVAL] = rival || { ...pred.cars[RIVAL] };
     const src = over && overState ? overState : base;
     return {
       ...src,
-      time: over ? src.time : pred.time, timeLeft: over ? src.timeLeft : pred.timeLeft,
+      time: over ? src.time : pred.time,
       phase: over ? 'over' : pred.phase,
       cars,
       winner: over ? src.winner : null, reason: over ? src.reason : null,

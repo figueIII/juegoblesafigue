@@ -45,7 +45,7 @@ export async function launch() {
 
 const fake = fs.readFileSync(path.join(here, 'fakepeer.js'), 'utf8');
 /**
- * Contexto con PeerJS falso. overrides: valores de src/config.js a reescribir, p.ej. { RACE_SECONDS: 6, LENGTH: 2500 }.
+ * Contexto con PeerJS falso. overrides: valores de src/config.js a reescribir, p.ej. { LENGTH: 2500 }.
  * latencyMs: latencia unidireccional simulada entre pestañas.
  */
 export async function newCtx(browser, { overrides = {}, latencyMs = 0, viewport = { width: 900, height: 600 }, ...rest } = {}) {

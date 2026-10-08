@@ -1,10 +1,22 @@
-// Sesión autoritativa del anfitrión: simula a 60 Hz, envía snapshots a 20 Hz.
+// Sesión autoritativa del anfitrión: simula a 60 Hz, envía snapshots a SNAPSHOT_HZ (30 Hz).
 // La física se inyecta (`physics`, `generateTrack`) para poder probar con un stub.
 import { CONFIG } from '../config.js';
 import { MSG } from '../shared/protocol.js';
 import { NEUTRAL_INPUT, sanitizeInput } from './peer.js';
 
 const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+const r2 = (v) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v);
+const r4 = (v) => (typeof v === 'number' ? Math.round(v * 10000) / 10000 : v);
+/** Copia del estado con decimales recortados para reducir el tamaño del snapshot (no muta `s`). */
+export function roundState(s) {
+  const o = { ...s };
+  if (typeof s.time === 'number') o.time = r4(s.time);
+  if (Array.isArray(s.cars)) o.cars = s.cars.map((c) => { const q = { ...c }; for (const k in q) q[k] = k === 'angle' ? r4(q[k]) : r2(q[k]); return q; });
+  if (Array.isArray(s.projectiles)) o.projectiles = s.projectiles.map((p) => { const q = { ...p }; for (const k in q) q[k] = r2(q[k]); return q; });
+  if (Array.isArray(s.hazards)) o.hazards = s.hazards.map((h) => { const q = { ...h }; for (const k in q) q[k] = r2(q[k]); return q; });
+  return o;
+}
 
 /** Carga la física/pista reales si no se inyectaron (import dinámico: no rompe tests con stub). */
 export async function resolveShared(physics, generateTrack) {
@@ -83,7 +95,7 @@ export function createHostSession(o) {
   }
 
   function sendSnap() {
-    link.send(MSG.SNAP, { tick: state.tick, ackSeq, state }, { reliable: false });
+    link.send(MSG.SNAP, { tick: state.tick, ackSeq, state: roundState(state) }, { reliable: false });
   }
 
   function finish() {

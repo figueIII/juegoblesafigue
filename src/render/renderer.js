@@ -305,13 +305,16 @@ export function createRenderer(canvas) {
     if (me) bar(m, m + 16, bw, 16, me.hp / maxHp, `TÚ  ${Math.ceil(me.hp)}`, COL.car[me.id], false);
     if (rival) bar(W - m - bw, m + 16, bw, 16, rival.hp / maxHp, `RIVAL  ${Math.ceil(rival.hp)}`, COL.car[rival.id], true);
 
-    // temporizador
-    const tl = Math.max(0, state.timeLeft ?? CONFIG.RACE_SECONDS);
+    // indicador de remontada (sin temporizador: no hay límite de tiempo)
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.font = font(28); ctx.fillStyle = tl < 10 ? COL.hpLow : COL.text;
-    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
-    ctx.fillText(`${Math.floor(tl / 60)}:${String(Math.floor(tl % 60)).padStart(2, '0')}`, W / 2, m);
-    ctx.shadowBlur = 0;
+    if ((me && me.turbo) || (rival && rival.turbo)) {
+      const mine = !!(me && me.turbo);
+      ctx.font = font(22); ctx.fillStyle = mine ? COL.hp : COL.hpLow;
+      ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
+      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(t * 8);
+      ctx.fillText(mine ? '¡TURBO REMONTADA!' : 'Rival en turbo', W / 2, m);
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    }
 
     // posición y progreso
     if (me && rival) {

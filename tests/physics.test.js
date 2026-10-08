@@ -186,22 +186,79 @@ test('victoria por HP 0', () => {
   assert.equal(s.winner, 1);
 });
 
-test('victoria por tiempo: gana el más adelantado; empate exacto = draw', () => {
+test('sin límite de tiempo: pasado cualquier tiempo la carrera sigue; ambos destruidos a la vez = empate', () => {
   const track = emptyTrack();
   let s = raceState(track);
-  s.time = CONFIG.RACE_SECONDS - DT / 2;
+  s.time = 10000;
   s.cars[0].y = -10; s.cars[1].y = -500;
   step(s, [IDLE, IDLE], DT, track);
-  assert.equal(s.reason, 'time');
-  assert.equal(s.winner, 1);
-  assert.equal(s.timeLeft, 0);
+  assert.equal(s.phase, 'race');
+  assert.equal(s.reason, null);
+  assert.equal('timeLeft' in s, false);
 
   s = raceState(track);
-  s.time = CONFIG.RACE_SECONDS - DT / 2;
-  s.cars[0].x = -100; s.cars[1].x = 100; s.cars[0].y = s.cars[1].y = -42;
+  s.cars[0].hp = s.cars[1].hp = 0;
   step(s, [IDLE, IDLE], DT, track);
-  assert.equal(s.reason, 'time');
+  assert.equal(s.reason, 'destroyed');
   assert.equal(s.winner, 'draw');
+});
+
+test('remontada: el rezagado gana velocidad máx. proporcional a la distancia (tope), el líder no pierde', () => {
+  const C = CONFIG.CATCHUP;
+  const track = emptyTrack();
+  const top = (gap) => {
+    const s = raceState(track);
+    s.cars[0].y = -gap; s.cars[1].y = 0;       // coche 1 va por detrás
+    s.cars[0].x = -100; s.cars[1].x = 100;
+    step(s, [IDLE, GAS], DT, track);
+    return s.cars.map((c) => c.boost);
+  };
+  assert.deepEqual(top(C.START - 50), [0, 0]);
+  const mid = top((C.START + C.FULL) / 2);
+  assert.ok(Math.abs(mid[1] - C.MAX_BONUS / 2) < 1e-9 && mid[0] === 0);
+  assert.ok(Math.abs(top(C.FULL * 3)[1] - C.MAX_BONUS) < 1e-9);
+
+  // velocidad límite real
+  const s = raceState(track);
+  s.cars[0].y = -C.FULL * 2; s.cars[0].x = -100; s.cars[1].x = 100;
+  s.cars[1].vy = -CONFIG.CAR.MAX_SPEED;
+  for (let i = 0; i < 30; i++) step(s, [IDLE, GAS], DT, track);
+  const sp = Math.hypot(s.cars[1].vx, s.cars[1].vy);
+  assert.ok(sp > CONFIG.CAR.MAX_SPEED * 1.1 && sp <= CONFIG.CAR.MAX_SPEED * (1 + C.MAX_BONUS) + 1e-6, `velocidad ${sp}`);
+});
+
+test('remontada: sesgo de pickups y turbo (sabotaje automático con cooldown)', () => {
+  const C = CONFIG.CATCHUP;
+  const track = emptyTrack();
+  // sesgo: muchos ids, el rezagado recibe más misiles que el líder
+  const count = (dy) => {
+    let m = 0;
+    for (let id = 0; id < 300; id++) {
+      const s = raceState(track);
+      s.pickups = [{ id, x: 0, y: -1000, taken: false }];
+      s.cars[0].x = 0; s.cars[0].y = -1000;               // coche 0 recoge
+      s.cars[1].x = 200; s.cars[1].y = -1000 + dy;
+      step(s, [IDLE, IDLE], DT, track);
+      if (s.cars[0].slot === 'missile') m++;
+    }
+    return m;
+  };
+  const leaderMissiles = count(C.PICKUP_BIAS_GAP + 100);        // coche 0 va por delante
+  const behindMissiles = count(-(C.PICKUP_BIAS_GAP + 100));   // coche 0 va por detrás
+  assert.ok(behindMissiles > leaderMissiles * 2, `${behindMissiles} vs ${leaderMissiles}`);
+
+  // turbo
+  const s = raceState(track);
+  s.cars[0].y = -C.TURBO_GAP - 10; s.cars[0].x = -100; s.cars[1].x = 100;
+  step(s, [IDLE, IDLE], DT, track);
+  assert.equal(s.cars[1].turbo, true); assert.equal(s.cars[0].turbo, false);
+  assert.equal(s.cars[1].slot, C.TURBO_KIND);
+  s.cars[1].slot = null;
+  step(s, [IDLE, IDLE], DT, track);
+  assert.equal(s.cars[1].slot, null, 'cooldown');
+  s.cars[1].turboCd = 0;
+  step(s, [IDLE, IDLE], DT, track);
+  assert.equal(s.cars[1].slot, C.TURBO_KIND);
 });
 
 test('forfeit = desconexión', () => {

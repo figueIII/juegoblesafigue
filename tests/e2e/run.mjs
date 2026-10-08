@@ -78,21 +78,6 @@ const scenarios = {
     return ctx;
   },
 
-  // Victoria por tiempo: gana el más adelantado (aquí el invitado).
-  async tiempo() {
-    const ctx = await newCtx(browser, { overrides: { RACE_SECONDS: 5, LENGTH: 40000, OBSTACLE_DENSITY: 0 } });
-    const H = await ctx.mk('H'), G = await ctx.mk('G');
-    await createAndJoin(BASE, H, G);
-    await waitFor(phaseIs(H, 'race'), 15000, 'carrera');
-    await G.bringToFront(); await G.keyboard.down('w');
-    await waitFor(async () => (await resultShown(H)()) && (await resultShown(G)()), 20000, 'panel de resultados');
-    assert.match(await title(G), /Victoria/); assert.match(await title(H), /Derrota/);
-    assert.match(await G.textContent('#ui'), /tiempo/i);
-    await assertNoOverlap(H);
-    await shot(G, 'tiempo-guest');
-    return ctx;
-  },
-
   // Sala llena: el tercer jugador recibe un mensaje claro y la partida en curso no se ve afectada.
   async sala_llena() {
     const ctx = await newCtx(browser);

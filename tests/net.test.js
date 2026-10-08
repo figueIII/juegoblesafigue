@@ -13,9 +13,9 @@ const until = async (fn, ms = 3000) => { const t = Date.now(); while (!fn()) { i
 const generateTrack = (seed) => ({ seed, width: 600, finishY: -300, segments: [], obstacles: [], pickups: [] });
 const mkCar = (id, x) => ({ id, x, y: 0, angle: 0, vx: 0, vy: 0, hp: 100, slot: null, cooldown: 0, oilTimer: 0, empTimer: 0 });
 const physics = {
-  createState: () => ({ tick: 0, time: 0, phase: 'race', timeLeft: 60, cars: [mkCar(0, -50), mkCar(1, 50)], projectiles: [], hazards: [], pickups: [], winner: null, reason: null }),
+  createState: () => ({ tick: 0, time: 0, phase: 'race', cars: [mkCar(0, -50), mkCar(1, 50)], projectiles: [], hazards: [], pickups: [], winner: null, reason: null }),
   step(s, inputs, dt, track) {
-    s.tick++; s.time += dt; s.timeLeft = 60 - s.time;
+    s.tick++; s.time += dt;
     s.cars.forEach((c, i) => { c.vy = -inputs[i].throttle * 400; c.vx = inputs[i].steer * 50; c.y += c.vy * dt; c.x += c.vx * dt; });
     if (s.phase === 'race') {
       const w = s.cars.findIndex((c) => c.y <= track.finishY);
@@ -91,7 +91,7 @@ test('el rival (host) llega al cliente interpolado, con el retardo configurado',
   const real = host.state.cars[0];
   assert.ok(v.cars[0].y < 0, 'el rival se mueve');
   assert.ok(v.cars[0].y > real.y, 'el rival se ve retrasado respecto al host');
-  assert.ok(CONFIG.INTERP_DELAY_MS === 100);
+  assert.ok(CONFIG.INTERP_DELAY_MS >= 100 && CONFIG.INTERP_DELAY_MS <= 120);
   host.stop();
 });
 

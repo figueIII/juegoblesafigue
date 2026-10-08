@@ -52,9 +52,10 @@ export function makeBot({ skill = 1, aggressive = true, seed = 1 } = {}) {
 }
 
 /** Corre una carrera completa. Devuelve { time, winner, reason, y:[..], hp:[..], used:{...} }. */
-export function simulate({ seed = 1, bots = [makeBot({ seed: 11 }), makeBot({ seed: 22 })], dt = 1 / CONFIG.PHYSICS_HZ, maxTicks = 60 * 120 } = {}) {
+export function simulate({ seed = 1, bots = [makeBot({ seed: 11 }), makeBot({ seed: 22 })], dt = 1 / CONFIG.PHYSICS_HZ, maxTicks = 60 * 240, headStart = 0 } = {}) {
   const track = generateTrack(seed);
   const st = createState(track);
+  st.cars[0].y = -headStart; // ventaja inicial del coche 0 (px), para probar remontadas
   const used = { missile: 0, oil: 0, emp: 0 };
   let hits = { missile: 0 }, firstFinishT = null;
   for (let i = 0; i < maxTicks && st.phase !== 'over'; i++) {
@@ -63,7 +64,8 @@ export function simulate({ seed = 1, bots = [makeBot({ seed: 11 }), makeBot({ se
     step(st, inputs, dt, track);
     st.cars.forEach((c, k) => { if (before[k] && !c.slot) used[before[k]]++; });
   }
-  return { time: st.time, winner: st.winner, reason: st.reason, y: st.cars.map((c) => c.y), hp: st.cars.map((c) => c.hp), used, state: st, track };
+  let leaderId = headStart > 0 ? 0 : null;
+  return { leaderId, time: st.time, winner: st.winner, reason: st.reason, y: st.cars.map((c) => c.y), hp: st.cars.map((c) => c.hp), used, state: st, track };
 }
 
 export function summarize(n = 20, mk = (k) => ({ seed: k + 1, bots: [makeBot({ seed: k * 2 + 1, skill: 0.9 }), makeBot({ seed: k * 2 + 2, skill: 0.8 })] })) {
@@ -72,11 +74,24 @@ export function summarize(n = 20, mk = (k) => ({ seed: k + 1, bots: [makeBot({ s
   return rs;
 }
 
+/** Remontada: el coche 0 sale con `headStart` px de ventaja; devuelve % de victorias del líder inicial, del rezagado y duración media. */
+export function comebackStats(n = 24, headStart = 1500, skill = 0.95) {
+  let lead = 0, behind = 0, draw = 0, time = 0;
+  for (let k = 0; k < n; k++) {
+    const bots = [0, 1].map((i) => makeBot({ seed: k * 2 + i + 1, skill, aggressive: true }));
+    const r = simulate({ seed: k + 1, bots, headStart });
+    time += r.time;
+    if (r.winner === 'draw') draw++; else if (r.winner === 0) lead++; else behind++;
+  }
+  return { n, leaderWins: lead / n, comebacks: behind / n, draws: draw / n, avgTime: time / n };
+}
+
 if (process.argv[1] && process.argv[1].endsWith('botsim.js')) {
   const rs = summarize(+process.argv[2] || 20);
   const by = {}; rs.forEach((r) => { by[r.reason] = (by[r.reason] || 0) + 1; });
   const times = rs.map((r) => r.time);
   console.log('reasons', by, 'time min/avg/max', Math.min(...times).toFixed(1), (times.reduce((a, b) => a + b) / times.length).toFixed(1), Math.max(...times).toFixed(1));
   console.log('distance avg', (rs.reduce((a, r) => a + Math.max(-r.y[0], -r.y[1]), 0) / rs.length).toFixed(0), 'min hp avg', (rs.reduce((a, r) => a + Math.min(...r.hp), 0) / rs.length).toFixed(0));
+  for (const hs of [0, 800, 1500, 2500]) console.log('headStart', hs, comebackStats(+process.argv[2] || 20, hs));
   console.log('sabotages used', rs.reduce((a, r) => a + r.used.missile + r.used.oil + r.used.emp, 0) / rs.length);
 }
