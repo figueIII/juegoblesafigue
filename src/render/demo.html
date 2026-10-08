@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Demo render</title>
+<style>html,body{margin:0;height:100%;background:#05060f;overflow:hidden}canvas{width:100vw;height:100vh;display:block;touch-action:none}</style>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+import { createRenderer } from './renderer.js';
+import { createInput } from '../input/input.js';
+const q = new URLSearchParams(location.search);
+const canvas = document.getElementById('c');
+const r = createRenderer(canvas);
+const input = createInput(canvas, r.getCameraToWorld);
+
+// Pista mock
+const segments = []; for (let i = 0; i <= 200; i++) segments.push({ y: -i * 200, cx: Math.sin(i * 0.15) * 140 });
+const cx = (y) => { const f = Math.min(199.99, Math.max(0, -y / 200)), i = Math.floor(f); return segments[i].cx + (segments[i + 1].cx - segments[i].cx) * (f - i); };
+const obstacles = []; for (let i = 3; i < 60; i += 2) obstacles.push({ x: cx(-i * 200) + (i % 4 - 1.5) * 120, y: -i * 200, w: 60, h: 40 });
+const pickups = []; for (let i = 5; i < 60; i += 9) pickups.push({ x: cx(-i * 200), y: -i * 200 });
+const track = { width: 600, finishY: -3000, segments, obstacles, pickups };
+
+const phase = q.get('phase') || 'race';
+const state = {
+  tick: 0, time: phase === 'countdown' ? -1.4 : 5, phase, timeLeft: 42, winner: phase === 'over' ? 0 : null, reason: phase === 'over' ? 'finish' : null,
+  cars: [
+    { id: 0, x: cx(-900), y: -900, angle: 0.1, vx: 0, vy: -400, hp: 72, slot: 'missile', cooldown: 0, oilTimer: 0, empTimer: 0 },
+    { id: 1, x: cx(-1000) + 80, y: -1000, angle: -0.15, vx: 0, vy: -380, hp: 28, slot: null, cooldown: 0, oilTimer: 0, empTimer: q.has('emp') ? 1 : 0 },
+  ],
+  projectiles: [{ id: 1, owner: 0, x: cx(-1150), y: -1150, vx: 0, vy: -900, ttl: 1 }],
+  hazards: [{ id: 1, kind: 'oil', x: cx(-800) - 60, y: -800, r: 60, ttl: 3 }],
+  pickups: pickups.map((p, i) => ({ id: i, x: p.x, y: p.y, taken: false })),
+};
+let seq = 0, evs = [];
+window.__errors = [];
+addEventListener('error', (e) => window.__errors.push(String(e.message)));
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const inp = input.sample(seq++);
+  const me = state.cars[0];
+  me.angle += inp.steer * 2.2 * dt;
+  const sp = 300 + inp.throttle * 250;
+  me.vx = Math.sin(me.angle) * sp; me.vy = -Math.cos(me.angle) * sp;
+  me.x += me.vx * dt; me.y += me.vy * dt;
+  me.angle += (inp.fire ? 0 : 0);
+  const rv = state.cars[1]; rv.y -= 380 * dt; rv.x = cx(rv.y) + 80; rv.angle = Math.sin(rv.y / 300) * 0.2;
+  state.time += dt; state.tick++;
+  if (state.phase === 'countdown') state.time = -1.4;
+  if (inp.fire && !state.__f) { evs.push({ kind: 'hit', x: rv.x, y: rv.y, what: 'missile', id: 1 }); rv.hp = Math.max(1, rv.hp - 5); }
+  state.__f = inp.fire;
+  state.projectiles[0].y -= 900 * dt;
+  r.draw(state, track, 0, evs); evs = [];
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__ready = true;
+</script></body></html>

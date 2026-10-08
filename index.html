@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Neon Rivals - Carrera 1v1</title>
+  <meta name="description" content="Carrera 1v1 P2P con sabotajes, directa en el navegador.">
+  <meta name="theme-color" content="#06060f">
+  <link rel="stylesheet" href="./src/ui/style.css">
+  <!-- PeerJS 1.5.4 fijado, con SRI (sha384 del dist/peerjs.min.js del paquete npm). Si el CDN falla o el hash no coincide, se usa la copia local ./vendor -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" crossorigin="anonymous"
+    integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR"
+    onerror="var s=document.createElement('script');s.src='./vendor/peerjs.min.js';document.head.appendChild(s)"></script>
+</head>
+<body>
+  <noscript><p style="padding:24px;color:#fff">Este juego necesita JavaScript.</p></noscript>
+  <canvas id="game" tabindex="0"></canvas>
+  <div id="ui" aria-live="polite"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
